@@ -417,7 +417,7 @@ Kadhali server → http://192.168.1.20:8765
 
 <script>
 (function(){
-  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var reduce = (typeof matchMedia === 'function') && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   var hdr = document.getElementById('hdr');
   addEventListener('scroll', function(){ hdr.classList.toggle('scrolled', scrollY > 8); }, {passive:true});
@@ -427,16 +427,24 @@ Kadhali server → http://192.168.1.20:8765
   var html = langs.map(function(l){ return '<span class="lang">' + l + '</span>'; }).join('');
   track.innerHTML = html + html;
 
-  var io = new IntersectionObserver(function(es){
-    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('on'); io.unobserve(e.target); } });
-  }, {threshold:.12, rootMargin:'0px 0px -40px 0px'});
-  document.querySelectorAll('.reveal').forEach(function(el, i){
-    el.style.transitionDelay = (Math.min(i,6)*55) + 'ms';
-    io.observe(el);
-  });
+  var reveals = document.querySelectorAll('.reveal');
+  if (typeof IntersectionObserver === 'function') {
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('on'); io.unobserve(e.target); } });
+    }, {threshold:.12, rootMargin:'0px 0px -40px 0px'});
+    reveals.forEach(function(el, i){
+      el.style.transitionDelay = (Math.min(i,6)*55) + 'ms';
+      io.observe(el);
+    });
+  } else {
+    reveals.forEach(function(el){ el.classList.add('on'); });
+  }
 
   if (reduce) return;
-  var cv = document.getElementById('stars'), ctx = cv.getContext('2d');
+  var cv = document.getElementById('stars');
+  if (!cv || !cv.getContext) return;
+  var ctx = cv.getContext('2d');
+  if (!ctx) return;
   var pts = [], w = 0, h = 0, dpr = Math.min(devicePixelRatio || 1, 2);
   function size(){
     w = cv.width = innerWidth * dpr; h = cv.height = innerHeight * dpr;
