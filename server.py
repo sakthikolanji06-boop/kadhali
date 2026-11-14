@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Kadhali — local NVIDIA-powered voice assistant + PC control (stdlib only).
+"""Kadhali — local voice assistant + PC control (stdlib only).
+
+Any OpenAI-compatible provider works: NVIDIA NIM (default), OpenAI, Groq,
+OpenRouter, or your own local gateway. Set the provider in Settings or with
+KADHALI_BASE_URL / NVIDIA_BASE_URL.
 
 Security model:
-  * /api/chat, /api/models use your NVIDIA key (key.txt or X-NVIDIA-Key header).
+  * /api/chat, /api/models use your API key (key.txt or X-API-Key header).
   * /api/pc/* is DISABLED unless the server is started with --control.
   * Every /api/pc/* call needs the pairing token printed at startup
     (stored in ~/.kadhali/token, chmod 600).
@@ -10,7 +14,7 @@ Security model:
     ~/.kadhali/audit.log.
 """
 import argparse, base64, json, os, platform, re, secrets, shutil, socket, subprocess
-import sys, time, urllib.request, urllib.error
+import sys, time, urllib.parse, urllib.request, urllib.error
 from collections import deque
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -19,11 +23,13 @@ ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 KEY_FILE = ROOT / "key.txt"
 STATE_DIR = Path.home() / ".kadhali"
+CONFIG_FILE = STATE_DIR / "config.json"
 TOKEN_FILE = STATE_DIR / "token"
 AUDIT_FILE = STATE_DIR / "audit.log"
-DEFAULT_BASE = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-UA = "KadhaliVoice/1.0"
-VERSION = "2.0.0"
+DEFAULT_BASE = (os.environ.get("KADHALI_BASE_URL") or os.environ.get("NVIDIA_BASE_URL")
+                or "https://integrate.api.nvidia.com/v1")
+UA = "KadhaliVoice/2.1"
+VERSION = "2.1.0"
 
 WORKING_MODELS = [
     "nvidia/nemotron-3.5-bolt-e4b",
@@ -32,6 +38,39 @@ WORKING_MODELS = [
     "meta/llama-guard-4-12b",
     "nvidia/ising-calibration-1.5-31b",
 ]
+
+PROVIDERS = {
+    "nvidia": {
+        "name": "NVIDIA NIM",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "key_url": "https://build.nvidia.com",
+        "models": WORKING_MODELS,
+    },
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "key_url": "https://platform.openai.com/api-keys",
+        "models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
+    },
+    "groq": {
+        "name": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_url": "https://console.groq.com/keys",
+        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b"],
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "key_url": "https://openrouter.ai/keys",
+        "models": ["openai/gpt-4o", "anthropic/claude-3.7-sonnet", "google/gemini-2.0-flash-001"],
+    },
+    "custom": {
+        "name": "Custom (OpenAI-compatible)",
+        "base_url": "",
+        "key_url": "",
+        "models": [],
+    },
+}
 
 OPEN_TARGETS = {
     "files": str(Path.home()),
@@ -76,11 +115,77 @@ READ_EXT = {".txt", ".md", ".log", ".json", ".py", ".js", ".html", ".css", ".sh"
             ".conf", ".ini", ".yml", ".yaml", ".csv", ".toml", ".env"}
 
 
+def guess_provider(base_url):
+    host = (urllib.parse.urlsplit(base_url or "").netloc or "").lower()
+    for pid in ("nvidia", "openai", "groq", "openrouter"):
+        if host and (pid in host or (pid == "openai" and "openai" in host)):
+            return pid
+    return "custom"
+
+
+def load_config():
+    cfg = {"provider": "nvidia", "base_url": "", "model": ""}
+    try:
+        raw = json.loads(CONFIG_FILE.read_text())
+        if isinstance(raw, dict):
+            for k in ("provider", "base_url", "model"):
+                if isinstance(raw.get(k), str):
+                    cfg[k] = raw[k].strip()
+    except (OSError, ValueError):
+        pass
+    if not cfg["base_url"]:
+        cfg["base_url"] = DEFAULT_BASE
+    if cfg["provider"] not in PROVIDERS:
+        cfg["provider"] = guess_provider(cfg["base_url"])
+    return cfg
+
+
+def clean_base_url(url):
+    url = (url or "").strip().rstrip("/")
+    if not url:
+        return ""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return url
+
+
+def save_config(patch):
+    cfg = load_config()
+    if isinstance(patch.get("provider"), str) and patch["provider"] in PROVIDERS:
+        cfg["provider"] = patch["provider"]
+    if isinstance(patch.get("base_url"), str):
+        url = clean_base_url(patch["base_url"])
+        if url is None:
+            return None
+        cfg["base_url"] = url or DEFAULT_BASE
+        cfg["provider"] = guess_provider(cfg["base_url"])
+    if isinstance(patch.get("model"), str):
+        cfg["model"] = patch["model"].strip()
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(json.dumps(cfg, indent=2) + "\n")
+        os.chmod(CONFIG_FILE, 0o600)
+    except OSError:
+        pass
+    return cfg
+
+
+def api_base():
+    return load_config()["base_url"] or DEFAULT_BASE
+
+
+def provider_models(cfg=None):
+    cfg = cfg or load_config()
+    return list(PROVIDERS.get(cfg["provider"], {}).get("models") or [])
+
+
 def read_key(header_key=None):
     if header_key and header_key.strip():
         return header_key.strip()
-    if os.environ.get("NVIDIA_API_KEY"):
-        return os.environ["NVIDIA_API_KEY"].strip()
+    for env in ("KADHALI_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY"):
+        if os.environ.get(env):
+            return os.environ[env].strip()
     if KEY_FILE.exists():
         return KEY_FILE.read_text().strip()
     return ""
@@ -133,7 +238,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-NVIDIA-Key, X-Control-Token")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-NVIDIA-Key, X-Control-Token")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         p = self.path.split("?")[0]
         if p.endswith((".html", ".js", ".css", ".webmanifest", "/")):
@@ -158,15 +263,26 @@ class Handler(SimpleHTTPRequestHandler):
     def _is_local(self):
         return self.client_address[0] in ("127.0.0.1", "::1")
 
+    def _key(self):
+        return read_key(self.headers.get("X-API-Key") or self.headers.get("X-NVIDIA-Key"))
+
     def do_GET(self):
         if self.path == "/api/health":
+            cfg = load_config()
             return self._json(200, {"ok": True, "has_key": bool(read_key()),
-                                    "control": self.control_enabled, "version": VERSION})
-        if self.path == "/api/config":
-            return self._json(200, {"base_url": DEFAULT_BASE, "has_key": bool(read_key()),
                                     "control": self.control_enabled, "version": VERSION,
-                                    "models": WORKING_MODELS, "run_commands": RUN_COMMANDS,
-                                    "token": token() if (self.control_enabled and self._is_local()) else ""})
+                                    "provider": cfg["provider"], "base_url": cfg["base_url"]})
+        if self.path == "/api/config":
+            cfg = load_config()
+            return self._json(200, {
+                "base_url": cfg["base_url"], "provider": cfg["provider"], "model": cfg["model"],
+                "providers": {k: {"name": v["name"], "base_url": v["base_url"],
+                                  "key_url": v["key_url"], "models": v["models"]}
+                              for k, v in PROVIDERS.items()},
+                "has_key": bool(read_key()),
+                "control": self.control_enabled, "version": VERSION,
+                "models": provider_models(cfg), "run_commands": RUN_COMMANDS,
+                "token": token() if (self.control_enabled and self._is_local()) else ""})
         if self.path == "/api/models":
             return self._models()
         if self.path.startswith("/api/pc/"):
@@ -176,29 +292,49 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/savekey":
             return self._save_key()
+        if self.path == "/api/saveconfig":
+            return self._save_config()
         if self.path == "/api/chat":
             return self._chat()
         if self.path == "/api/pc/action":
             return self._pc_action()
         return self._json(404, {"error": "not_found"})
 
-    # ---------- NVIDIA ----------
+    # ---------- any OpenAI-compatible provider ----------
     def _models(self):
-        key = read_key(self.headers.get("X-NVIDIA-Key"))
+        cfg = load_config()
+        preset = provider_models(cfg)
+        key = self._key()
         if not key:
-            return self._json(401, {"error": "missing_api_key", "models": WORKING_MODELS})
-        req = urllib.request.Request(DEFAULT_BASE.rstrip("/") + "/models",
+            return self._json(401, {"error": "missing_api_key", "provider": cfg["provider"],
+                                    "base_url": cfg["base_url"], "models": preset})
+        req = urllib.request.Request(cfg["base_url"].rstrip("/") + "/models",
                                      headers={"Authorization": "Bearer " + key, "User-Agent": UA})
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
-            return self._json(e.code, {"error": e.read().decode()[:500]})
+            detail = e.read().decode(errors="replace")[:500]
+            return self._json(e.code, {"error": detail, "provider": cfg["provider"],
+                                       "base_url": cfg["base_url"]})
         except Exception as e:
-            return self._json(502, {"error": str(e)})
-        ids = sorted({m.get("id") for m in data.get("data", []) if m.get("id")})
-        working = [m for m in WORKING_MODELS if m in ids] or WORKING_MODELS
-        return self._json(200, {"models": ids, "working": working, "count": len(ids)})
+            return self._json(502, {"error": str(e), "provider": cfg["provider"],
+                                    "base_url": cfg["base_url"]})
+        ids = sorted({m.get("id") for m in data.get("data", []) if isinstance(m, dict) and m.get("id")})
+        working = ([m for m in preset if m in ids] or preset) if cfg["provider"] == "nvidia" else ids
+        return self._json(200, {"models": ids, "working": working, "count": len(ids),
+                                "provider": cfg["provider"], "base_url": cfg["base_url"]})
+
+    def _save_config(self):
+        payload = self._body()
+        if payload is None:
+            return self._json(400, {"error": "bad_json"})
+        cfg = save_config(payload)
+        if cfg is None:
+            return self._json(400, {"error": "bad_base_url",
+                                    "hint": "use an http:// or https:// URL"})
+        return self._json(200, {"saved": True, "provider": cfg["provider"],
+                                "base_url": cfg["base_url"], "model": cfg["model"]})
 
     def _save_key(self):
         payload = self._body()
@@ -223,11 +359,16 @@ class Handler(SimpleHTTPRequestHandler):
         if payload is None:
             return self._json(400, {"error": "bad_json"})
 
-        key = read_key(self.headers.get("X-NVIDIA-Key"))
+        cfg = load_config()
+        key = self._key()
         if not key:
-            return self._json(401, {"error": "missing_api_key"})
+            return self._json(401, {"error": "missing_api_key", "provider": cfg["provider"]})
 
-        model = payload.get("model") or "nvidia/nemotron-3.5-bolt-e4b"
+        model = (payload.get("model") or cfg["model"]
+                 or (provider_models(cfg) or [""])[0])
+        if not model:
+            return self._json(400, {"error": "no_model",
+                                    "hint": "pick a model for this provider"})
         messages = payload.get("messages") or []
         if not isinstance(messages, list) or not messages:
             return self._json(400, {"error": "no_messages"})
@@ -241,7 +382,7 @@ class Handler(SimpleHTTPRequestHandler):
             "stream": bool(payload.get("stream", True)),
         }
         req = urllib.request.Request(
-            DEFAULT_BASE.rstrip("/") + "/chat/completions",
+            cfg["base_url"].rstrip("/") + "/chat/completions",
             data=json.dumps(body).encode(),
             headers={
                 "Authorization": "Bearer " + key,
@@ -255,9 +396,11 @@ class Handler(SimpleHTTPRequestHandler):
             resp = urllib.request.urlopen(req, timeout=300)
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:800]
-            return self._json(e.code, {"error": detail})
+            return self._json(e.code, {"error": detail, "provider": cfg["provider"],
+                                       "base_url": cfg["base_url"]})
         except Exception as e:
-            return self._json(502, {"error": str(e)})
+            return self._json(502, {"error": str(e), "provider": cfg["provider"],
+                                    "base_url": cfg["base_url"]})
 
         self.send_response(200)
         ctype = "text/event-stream" if body["stream"] else "application/json"
@@ -587,7 +730,9 @@ def main():
     srv = ThreadingHTTPServer((host, args.port), Handler)
     shown = lan_ip() if host == "0.0.0.0" else host
     print(f"Kadhali {VERSION} running: http://{shown}:{args.port}")
-    print(f"  key: {'set' if read_key() else 'NOT set'}   models: {len(WORKING_MODELS)} curated")
+    cfg = load_config()
+    print(f"  provider: {cfg['provider']}  base: {cfg['base_url']}")
+    print(f"  key: {'set' if read_key() else 'NOT set'}   model: {cfg['model'] or '(auto)'}")
     if Handler.control_enabled:
         print(f"  PC control: ON   token: {token()}")
         print(f"  audit log: {AUDIT_FILE}")

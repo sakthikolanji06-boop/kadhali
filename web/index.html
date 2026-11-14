@@ -81,14 +81,24 @@
     </nav>
 
     <section class="pane active" data-pane="api">
-      <label>NVIDIA API key <span class="muted">(stored only on this device)</span>
-        <input id="apiKey" type="password" autocomplete="off" placeholder="nvapi-…"/>
+      <label>Provider
+        <select id="provider"></select>
+      </label>
+      <label>API base URL <span class="muted">(OpenAI-compatible)</span>
+        <input id="baseUrl" type="url" autocomplete="off" placeholder="https://api.openai.com/v1"/>
+      </label>
+      <label>API key <span class="muted">(any provider key)</span>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="nvapi-… / sk-… / gsk_…"/>
+      </label>
+      <label>Default model <span class="muted">(pick or type any model)</span>
+        <input id="modelName" type="text" list="modelOptions" autocomplete="off" placeholder="gpt-4o-mini"/>
+        <datalist id="modelOptions"></datalist>
       </label>
       <label id="serverRow" class="hidden">Server URL
         <input id="serverUrl" type="url" placeholder="http://192.168.1.10:8765"/>
       </label>
-      <div class="row wrap"><button type="button" id="testKey" class="ghost">Test key</button><button type="button" id="removeKey" class="ghost danger-text">Remove key</button><span id="keyStatus" class="muted"></span></div>
-      <p class="muted small">Get a free key at build.nvidia.com. The key is sent only to NVIDIA.</p>
+      <div class="row wrap"><button type="button" id="testKey" class="ghost">Test key</button><button type="button" id="refreshModels" class="ghost">Refresh models</button><button type="button" id="removeKey" class="ghost danger-text">Remove key</button><span id="keyStatus" class="muted"></span></div>
+      <p class="muted small" id="providerHint">Works with NVIDIA NIM, OpenAI, Groq, OpenRouter, or any OpenAI-compatible endpoint. The key is stored only on your server.</p>
     </section>
 
     <section class="pane" data-pane="chat">
@@ -261,11 +271,11 @@
 <dialog id="onboard" class="dlg onboard">
   <div class="dlg-body">
     <h2>Welcome to Kadhali</h2>
-    <p class="muted">Your own voice AI. Any language. Coding help. Free with your NVIDIA key.</p>
-    <label>NVIDIA API key
-      <input id="onboardKey" type="password" placeholder="nvapi-…" autocomplete="off"/>
+    <p class="muted">Your own voice AI. Any language. Coding help. Any OpenAI-compatible provider.</p>
+    <label>API key
+      <input id="onboardKey" type="password" placeholder="nvapi-… or sk-…" autocomplete="off"/>
     </label>
-    <p class="muted small">Get one at <a href="https://build.nvidia.com" target="_blank" rel="noopener">build.nvidia.com</a> → API Keys.</p>
+    <p class="muted small">NVIDIA keys at <a href="https://build.nvidia.com" target="_blank" rel="noopener">build.nvidia.com</a>; switch to OpenAI, Groq, OpenRouter or any endpoint in ⚙ → API.</p>
     <div class="row"><button id="onboardSave" class="primary">Start</button><button id="onboardSkip" class="ghost">Later</button></div>
   </div>
 </dialog>

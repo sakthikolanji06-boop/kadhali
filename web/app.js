@@ -12,6 +12,13 @@ const MODEL_LIST = [
   'meta/llama-3.2-90b-vision-instruct','nvidia/nemotron-3.5-lightning-30b-a3b',
   'nvidia/nemotron-3-ultra-550b-a55b','deepseek-ai/deepseek-v4.1-flash','moonshotai/kimi-k2.6'
 ];
+const PROVIDER_FALLBACK = {
+  nvidia: { name: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', key_url: 'https://build.nvidia.com', models: MODEL_LIST },
+  openai: { name: 'OpenAI', base_url: 'https://api.openai.com/v1', key_url: 'https://platform.openai.com/api-keys', models: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'] },
+  groq: { name: 'Groq', base_url: 'https://api.groq.com/openai/v1', key_url: 'https://console.groq.com/keys', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'qwen/qwen3-32b'] },
+  openrouter: { name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', key_url: 'https://openrouter.ai/keys', models: ['openai/gpt-4o', 'anthropic/claude-3.7-sonnet', 'google/gemini-2.0-flash-001'] },
+  custom: { name: 'Custom (OpenAI-compatible)', base_url: '', key_url: '', models: [] }
+};
 const PERSONAS = {
   kadhali: { name: 'Kadhali', prompt: DEFAULT_SYSTEM },
   coder: { name: 'Code Kadhali', prompt: 'You are Kadhali, an expert software engineer. Give production-quality, complete, runnable code. Explain briefly, then code. Ask nothing unless truly blocked.' },
@@ -56,6 +63,8 @@ const el = {
   voiceState: $('#voiceState'), voiceText: $('#voiceText'),
   settings: $('#settings'), closeSettings: $('#closeSettings'),
   apiKey: $('#apiKey'), serverRow: $('#serverRow'), serverUrl: $('#serverUrl'), testKey: $('#testKey'), keyStatus: $('#keyStatus'),
+  provider: $('#provider'), baseUrl: $('#baseUrl'), modelName: $('#modelName'), modelOptions: $('#modelOptions'),
+  refreshModels: $('#refreshModels'), providerHint: $('#providerHint'),
   persona: $('#persona'), systemPrompt: $('#systemPrompt'), smartRoute: $('#smartRoute'), streaming: $('#streaming'),
   temperature: $('#temperature'), tempVal: $('#tempVal'), topP: $('#topP'), topVal: $('#topVal'),
   maxTokens: $('#maxTokens'), maxVal: $('#maxVal'),
@@ -79,7 +88,7 @@ const el = {
 };
 
 const defaults = {
-  apiKey: '', persona: 'kadhali', system: DEFAULT_SYSTEM, smartRoute: true, streaming: true,
+  apiKey: '', provider: 'nvidia', baseUrl: '', persona: 'kadhali', system: DEFAULT_SYSTEM, smartRoute: true, streaming: true,
   temperature: 0.7, topP: 0.95, maxTokens: 2048, model: MODELS.general,
   lang: 'auto', ttsLang: 'auto', voiceName: '', rate: 1, pitch: 1.1,
   autoSpeak: true, handsFree: false, wakeWord: false, autoSend: true,
@@ -225,7 +234,7 @@ function renderMarkdown(src) {
 
 /* ---------- routing ---------- */
 function routeModel(text) {
-  if (!state.settings.smartRoute) return state.settings.model;
+  if (!state.settings.smartRoute || state.settings.provider !== 'nvidia') return state.settings.model;
   if (/\b(translate|translation|மொழிபெயர்|अनुवाद|traduire|traduce)\b/i.test(text)) return MODELS.translate;
   if (/(```|\b(function|class|def |import |const |let |var |return |SELECT |npm |pip |docker|error|bug|stack ?trace|compile|debug|api|regex|sql|python|javascript|java|c\+\+|typescript|react|node)\b)/i.test(text)) return MODELS.coder;
   return state.settings.model || MODELS.general;
@@ -535,7 +544,7 @@ async function streamReply(c) {
   try {
     const res = await fetch(apiUrl('/api/chat'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-NVIDIA-Key': state.settings.apiKey },
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': state.settings.apiKey },
       body: JSON.stringify({
         model,
         messages: contextMessages(c),
@@ -652,8 +661,19 @@ function closeSettings() {
   if (el.settings.close) el.settings.close();
   else el.settings.removeAttribute('open');
 }
+function updateProviderHint() {
+  if (!el.providerHint) return;
+  const p = providerPresets()[state.settings.provider] || {};
+  if (p.key_url) el.providerHint.innerHTML = 'Get a key at <a href="' + esc(p.key_url) + '" target="_blank" rel="noopener">' + esc(p.key_url.replace(/^https?:\/\//, '')) + '</a>. Works with any model the provider offers.';
+  else el.providerHint.textContent = 'Point the base URL at any OpenAI-compatible endpoint (e.g. http://127.0.0.1:8000/v1). The key is stored only on your server.';
+}
+
 function fillSettingsUI() {
   const s = state.settings;
+  fillProviderSelect();
+  if (el.baseUrl) el.baseUrl.value = s.baseUrl || '';
+  if (el.modelName) el.modelName.value = s.model || '';
+  updateProviderHint();
   el.apiKey.value = s.apiKey;
   el.serverUrl.value = s.server || '';
   el.serverRow.classList.toggle('hidden', !android);
@@ -699,6 +719,9 @@ function saveSettings() {
   const s = state.settings;
   s.apiKey = el.apiKey.value.trim();
   s.server = el.serverUrl.value.trim();
+  if (el.provider) s.provider = el.provider.value;
+  if (el.baseUrl) s.baseUrl = el.baseUrl.value.trim();
+  if (el.modelName && el.modelName.value.trim()) s.model = el.modelName.value.trim();
   s.persona = el.persona.value;
   s.system = el.systemPrompt.value.trim() || DEFAULT_SYSTEM;
   s.smartRoute = el.smartRoute.checked;
@@ -720,6 +743,7 @@ function saveSettings() {
   applyLook();
   refreshKey();
   persist();
+  saveProviderConfig();
   if (s.apiKey) {
     fetch(apiUrl('/api/savekey'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: s.apiKey }) })
       .then(() => { serverHasKey = true; refreshKey(); fetchModels(); }).catch(() => {});
@@ -737,7 +761,7 @@ function refreshKey() {
   const ok = !!state.settings.apiKey || serverHasKey;
   el.brandDot.classList.toggle('ok', ok);
   el.brandDot.classList.toggle('bad', !ok);
-  el.brandDot.title = ok ? 'API key set' : 'Add your NVIDIA API key';
+  el.brandDot.title = ok ? 'API key set' : 'Add your API key';
   if (el.speakToggle) el.speakToggle.style.opacity = state.settings.autoSpeak ? 1 : 0.45;
   if (el.keyStatus && ok && !el.keyStatus.textContent) el.keyStatus.textContent = 'Server key active';
 }
@@ -1052,7 +1076,7 @@ function bindRemote() {
     try { android.openSettings(el.phSettings.value); phoneLog('opened ' + el.phSettings.value); } catch (_) {}
   };
   if (el.removeKey) el.removeKey.onclick = () => {
-    if (!confirm('Remove the saved NVIDIA key from this computer?')) return;
+    if (!confirm('Remove the saved API key from this computer?')) return;
     el.apiKey.value = '';
     el.apiKey.dataset.cleared = '1';
     state.settings.apiKey = '';
@@ -1107,20 +1131,52 @@ function exportAll() {
 
 /* ---------- models ---------- */
 function fillModels(list) {
-  const models = list && list.length ? list : MODEL_LIST;
-  if (!models.includes(state.settings.model)) models.unshift(state.settings.model);
+  const preset = ((state.providers || {})[state.settings.provider] || PROVIDER_FALLBACK[state.settings.provider] || {}).models || [];
+  const models = (list && list.length) ? list : (preset.length ? preset : MODEL_LIST);
+  if (state.settings.model && !models.includes(state.settings.model)) models.unshift(state.settings.model);
   el.model.innerHTML = models.map(m => '<option value="' + esc(m) + '"' + (m === state.settings.model ? ' selected' : '') + '>' + esc(m) + '</option>').join('');
   el.model.value = state.settings.model;
+  if (el.modelOptions) el.modelOptions.innerHTML = models.slice(0, 400).map(m => '<option value="' + esc(m) + '"></option>').join('');
+  if (el.modelName) el.modelName.value = state.settings.model;
 }
 async function fetchModels() {
   if (!state.settings.apiKey && !serverHasKey) return;
   try {
-    const r = await fetch(apiUrl('/api/models'), { headers: { 'X-NVIDIA-Key': state.settings.apiKey } });
+    const r = await fetch(apiUrl('/api/models'), { headers: { 'X-API-Key': state.settings.apiKey } });
     if (!r.ok) return;
     const j = await r.json();
     const list = (j.working && j.working.length) ? j.working : j.models;
     if (list && list.length) fillModels(list);
   } catch (_) {}
+}
+
+function providerPresets() { return state.providers || PROVIDER_FALLBACK; }
+
+function fillProviderSelect() {
+  if (!el.provider) return;
+  const presets = providerPresets();
+  el.provider.innerHTML = Object.entries(presets).map(([k, p]) =>
+    '<option value="' + esc(k) + '"' + (k === state.settings.provider ? ' selected' : '') + '>' + esc(p.name || k) + '</option>').join('');
+}
+
+async function saveProviderConfig(extra) {
+  const body = Object.assign({
+    provider: state.settings.provider,
+    base_url: state.settings.baseUrl || '',
+    model: state.settings.model || ''
+  }, extra || {});
+  try {
+    const r = await fetch(apiUrl('/api/saveconfig'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { el.keyStatus.textContent = j.error || ('Config failed (' + r.status + ')'); return false; }
+    state.settings.provider = j.provider || state.settings.provider;
+    state.settings.baseUrl = j.base_url || state.settings.baseUrl;
+    state.settings.model = j.model || state.settings.model;
+    persist();
+    return true;
+  } catch (_) { el.keyStatus.textContent = 'Network error'; return false; }
 }
 async function loadConfig() {
   try {
@@ -1128,9 +1184,16 @@ async function loadConfig() {
     const j = await r.json();
     serverHasKey = !!j.has_key;
     controlOn = !!j.control;
+    if (j.providers) state.providers = j.providers;
+    if (j.provider) state.settings.provider = j.provider;
+    if (j.base_url) state.settings.baseUrl = j.base_url;
+    if (j.model) state.settings.model = j.model;
     if (el.pcOff) el.pcOff.classList.toggle('hidden', controlOn);
     if (j.token) { state.settings.controlToken = j.token; if (el.pcToken) el.pcToken.value = j.token; }
+    fillProviderSelect();
+    if (el.baseUrl) el.baseUrl.value = state.settings.baseUrl || '';
     if (j.models && j.models.length) fillModels(j.models);
+    else fillModels(null);
     refreshKey();
   } catch (_) {}
 }
@@ -1188,18 +1251,42 @@ function bind() {
   el.menuBtn.onclick = openSidebar;
   el.closeSide.onclick = closeSidebar;
   el.scrim.onclick = closeSidebar;
-  el.model.onchange = () => { state.settings.model = el.model.value; state.settings.smartRoute = false; persist(); toast('Model: ' + el.model.value); };
+  el.model.onchange = () => { state.settings.model = el.model.value; state.settings.smartRoute = false; persist(); if (el.modelName) el.modelName.value = el.model.value; saveProviderConfig(); toast('Model: ' + el.model.value); };
+  if (el.provider) el.provider.onchange = () => {
+    state.settings.provider = el.provider.value;
+    const p = providerPresets()[state.settings.provider] || {};
+    if (p.base_url) { state.settings.baseUrl = p.base_url; el.baseUrl.value = p.base_url; }
+    if (p.key_url) el.providerHint.innerHTML = 'Get a key at <a href="' + esc(p.key_url) + '" target="_blank" rel="noopener">' + esc(p.key_url.replace(/^https?:\/\//, '')) + '</a>. Works with any model the provider offers.';
+    else el.providerHint.textContent = 'Point the base URL at any OpenAI-compatible endpoint (e.g. http://127.0.0.1:8000/v1).';
+    fillModels((p.models && p.models.length) ? p.models : null);
+    saveProviderConfig();
+  };
+  if (el.refreshModels) el.refreshModels.onclick = async () => {
+    await saveProviderConfig();
+    el.keyStatus.textContent = 'Loading models…';
+    await fetchModels();
+    el.keyStatus.textContent = 'Models refreshed';
+  };
+  if (el.modelName) el.modelName.onchange = () => {
+    const m = el.modelName.value.trim();
+    if (!m) return;
+    state.settings.model = m; state.settings.smartRoute = false; persist();
+    fillModels(null); saveProviderConfig(); toast('Model: ' + m);
+  };
   el.lang.onchange = () => { state.settings.lang = el.lang.value; if (state.settings.ttsLang === 'auto') { pickVoice(); fillVoiceSelect(); } persist(); el.lang.value = state.settings.lang; };
   el.exportAllBtn.onclick = exportAll;
   el.testKey.onclick = async () => {
     const key = el.apiKey.value.trim();
     if (!key) { el.keyStatus.textContent = 'Enter a key first'; return; }
     el.keyStatus.textContent = 'Testing…';
+    await saveProviderConfig();
     try {
-      const r = await fetch(apiUrl('/api/models'), { headers: { 'X-NVIDIA-Key': key } });
-      if (!r.ok) { el.keyStatus.textContent = 'Failed (' + r.status + ')'; return; }
-      const j = await r.json();
+      const r = await fetch(apiUrl('/api/models'), { headers: { 'X-API-Key': key } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { el.keyStatus.textContent = 'Failed (' + r.status + ')' + (j.error ? ' — ' + String(j.error).slice(0, 80) : ''); return; }
       el.keyStatus.textContent = '✓ ' + (j.models ? j.models.length : 0) + ' models available';
+      if (j.working && j.working.length) fillModels(j.working);
+      else if (j.models && j.models.length) fillModels(j.models);
     } catch (e) { el.keyStatus.textContent = 'Network error'; }
   };
   el.testVoice.onclick = () => speak('Hi, I am Kadhali. உங்களுக்கு எப்படி உதவலாம்?');
@@ -1248,7 +1335,7 @@ function bind() {
   el.onboardSave.onclick = () => {
     const k = el.onboardKey.value.trim();
     if (!k) return;
-    state.settings.apiKey = k; persist(); el.onboard.close(); refreshKey(); fetchModels();
+    state.settings.apiKey = k; persist(); el.onboard.close(); refreshKey(); saveProviderConfig(); fetchModels();
     fetch(apiUrl('/api/savekey'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: k }) }).catch(() => {});
     toast('Ready. Say something!');
   };

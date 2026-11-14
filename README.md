@@ -1,8 +1,9 @@
 # Kadhali
 
-A real, working voice AI assistant you run yourself. It uses your **NVIDIA NIM** key,
-speaks 40+ languages, writes code, and ships as a real Android APK that can also
-control **your own computer** over your Wi-Fi.
+A real, working voice AI assistant you run yourself. It works with **any
+OpenAI-compatible provider** — NVIDIA NIM (default), OpenAI, Groq, OpenRouter, or
+your own local gateway — speaks 40+ languages, writes code, and ships as a real
+Android APK that can also control **your own computer** over your Wi-Fi.
 
 Not a demo. Not a modified ChatGPT APK. Your key, your machine, your data.
 
@@ -11,6 +12,8 @@ Not a demo. Not a modified ChatGPT APK. Your key, your machine, your data.
 - **Live voice** — speak, it transcribes, answers and speaks back in a female voice
 - **40+ languages** — Tamil, Hindi, English, Arabic, Chinese, Japanese, and more
 - **Coding help** — complete runnable code with copy + Run buttons
+- **Any provider** — NVIDIA NIM, OpenAI, Groq, OpenRouter, or any OpenAI-compatible base URL
+- **Any model** — pick from the provider's list or type any model id
 - **Streaming answers** (SSE) with smart model routing
 - **Phone → PC control** (optional, opt-in): screenshot, volume/media, lock,
   type/keys, windows, files, approved commands, notifications, power actions
@@ -25,8 +28,10 @@ Not a demo. Not a modified ChatGPT APK. Your key, your machine, your data.
 ./run.sh                 # http://127.0.0.1:8765
 ```
 
-Open the URL, click ⚙ and paste your NVIDIA API key (https://build.nvidia.com),
-or drop it in `key.txt` / `NVIDIA_API_KEY`. The dot next to the title turns green.
+Open the URL, click ⚙ → API, choose a provider (NVIDIA, OpenAI, Groq, OpenRouter,
+or Custom) and paste your API key. For NVIDIA keys: https://build.nvidia.com.
+You can also drop the key in `key.txt` / `KADHALI_API_KEY` / `NVIDIA_API_KEY`, and
+override the endpoint with `KADHALI_BASE_URL`. The dot next to the title turns green.
 
 Phone on the same Wi-Fi:
 
@@ -84,7 +89,7 @@ See `docs/APK.md` for details and the manual pipeline.
 
 - Python 3.9+ (standard library only)
 - Linux desktop for PC control features (`xdotool`, `wmctrl`, `pactl`, `gnome-screenshot`)
-- An NVIDIA NIM API key
+- Any OpenAI-compatible API key (NVIDIA NIM, OpenAI, Groq, OpenRouter, local)
 
 ## Privacy
 
