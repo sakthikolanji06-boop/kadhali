@@ -1,0 +1,8 @@
+key.txt
+.env
+*.apk
+*.apk.idsig
+*.keystore
+__pycache__/
+android/assets/
+android/gen/
