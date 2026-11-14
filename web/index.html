@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-accent="violet">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#0a1020"/>
+<title>Kadhali — Voice AI</title>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<link rel="icon" href="/icons/logo.svg" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+<link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar" class="sidebar">
+    <div class="side-top">
+      <button id="newChat" class="primary">+ New chat</button>
+      <button id="closeSide" class="icon only-mobile" title="Close">✕</button>
+    </div>
+    <input id="searchChats" class="search" placeholder="Search chats"/>
+    <div id="chatList" class="chat-list"></div>
+    <div class="side-foot">
+      <button id="themeBtn" class="icon" title="Theme">◐</button>
+      <button id="settingsBtn" class="icon" title="Settings">⚙</button>
+      <button id="exportAllBtn" class="icon" title="Export all">⤓</button>
+    </div>
+  </aside>
+  <div id="scrim" class="scrim"></div>
+
+  <main class="main">
+    <header class="topbar">
+      <button id="menuBtn" class="icon only-mobile" title="Menu">☰</button>
+      <div class="brand">
+        <img src="/icons/logo.svg" alt=""/>
+        <span>Kadhali</span>
+        <i id="keyDot" class="dot"></i>
+      </div>
+      <select id="model" class="model" title="Model"></select>
+      <div class="top-actions">
+        <button id="remoteBtn" class="icon" title="Control my PC / phone">🖥</button>
+        <button id="paletteBtn" class="icon" title="Command palette (Ctrl+K)">⌘K</button>
+        <button id="settleBtn" class="icon" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <div id="chat" class="chat"></div>
+    <button id="scrollDown" class="scroll-down hidden" title="Scroll to bottom">↓</button>
+
+    <div class="composer-wrap">
+      <div id="attachments" class="attachments"></div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Message Kadhali… anything, any language"></textarea>
+        <div class="controls">
+          <div class="left">
+            <button id="attachBtn" class="icon" title="Attach code/text file">📎</button>
+            <select id="lang" class="lang" title="Speech language"></select>
+            <button id="micBtn" class="icon mic" title="Speak">🎙</button>
+            <button id="speakToggle" class="icon" title="Auto-speak replies">🔊</button>
+          </div>
+          <div class="right">
+            <button id="stopBtn" class="icon danger hidden" title="Stop">■</button>
+            <button id="sendBtn" class="send" title="Send (Enter)">➤</button>
+          </div>
+        </div>
+        <div id="voiceState" class="voice-state hidden"><span class="pulse"></span><span id="voiceText">Listening…</span></div>
+      </div>
+      <div class="hint">Enter to send · Shift+Enter newline · Ctrl+K commands</div>
+    </div>
+  </main>
+</div>
+
+<dialog id="settings" class="dlg">
+  <form method="dialog" class="dlg-body">
+    <div class="dlg-head"><h2>Settings</h2><button class="icon" id="closeSettings" value="close">✕</button></div>
+    <nav class="tabs">
+      <button type="button" class="tab active" data-tab="api">API</button>
+      <button type="button" class="tab" data-tab="chat">Chat</button>
+      <button type="button" class="tab" data-tab="voice">Voice</button>
+      <button type="button" class="tab" data-tab="look">Appearance</button>
+      <button type="button" class="tab" data-tab="data">Data</button>
+    </nav>
+
+    <section class="pane active" data-pane="api">
+      <label>NVIDIA API key <span class="muted">(stored only on this device)</span>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="nvapi-…"/>
+      </label>
+      <label id="serverRow" class="hidden">Server URL
+        <input id="serverUrl" type="url" placeholder="http://192.168.1.10:8765"/>
+      </label>
+      <div class="row wrap"><button type="button" id="testKey" class="ghost">Test key</button><button type="button" id="removeKey" class="ghost danger-text">Remove key</button><span id="keyStatus" class="muted"></span></div>
+      <p class="muted small">Get a free key at build.nvidia.com. The key is sent only to NVIDIA.</p>
+    </section>
+
+    <section class="pane" data-pane="chat">
+      <label>Persona
+        <select id="persona"></select>
+      </label>
+      <label>System prompt
+        <textarea id="systemPrompt" rows="4"></textarea>
+      </label>
+      <label class="check"><input id="smartRoute" type="checkbox"/> Smart model routing (auto-pick coder/translator)</label>
+      <label class="check"><input id="streaming" type="checkbox"/> Streaming answers</label>
+      <div class="grid2">
+        <label>Temperature <output id="tempVal">0.7</output>
+          <input id="temperature" type="range" min="0" max="1.5" step="0.05" value="0.7"/>
+        </label>
+        <label>Top-p <output id="topVal">0.95</output>
+          <input id="topP" type="range" min="0.1" max="1" step="0.05" value="0.95"/>
+        </label>
+      </div>
+      <label>Max tokens <output id="maxVal">2048</output>
+        <input id="maxTokens" type="range" min="128" max="8192" step="128" value="2048"/>
+      </label>
+    </section>
+
+    <section class="pane" data-pane="voice">
+      <label>Speech language
+        <select id="ttsLang"></select>
+      </label>
+      <label>Voice
+        <select id="voice"></select>
+      </label>
+      <div class="grid2">
+        <label>Rate <output id="rateVal">1.0</output>
+          <input id="rate" type="range" min="0.5" max="1.6" step="0.05" value="1"/>
+        </label>
+        <label>Pitch <output id="pitchVal">1.1</output>
+          <input id="pitch" type="range" min="0.5" max="2" step="0.05" value="1.1"/>
+        </label>
+      </div>
+      <label class="check"><input id="autoSpeak" type="checkbox"/> Speak replies automatically</label>
+      <label class="check"><input id="handsFree" type="checkbox"/> Hands-free (reopen mic after speaking)</label>
+      <label class="check"><input id="wakeWord" type="checkbox"/> Wake word “Kadhali”</label>
+      <label class="check"><input id="autoSend" type="checkbox"/> Auto-send when speech ends</label>
+      <div class="row"><button type="button" id="testVoice" class="ghost">Test voice</button></div>
+    </section>
+
+    <section class="pane" data-pane="look">
+      <label>Theme
+        <select id="theme">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+          <option value="system">System</option>
+        </select>
+      </label>
+      <label>Accent
+        <div id="accents" class="accents"></div>
+      </label>
+    </section>
+
+    <section class="pane" data-pane="data">
+      <p class="muted small">Everything is stored in this browser/device. Nothing is uploaded except your messages to NVIDIA.</p>
+      <div class="row wrap">
+        <button type="button" id="exportData" class="ghost">Export all chats</button>
+        <button type="button" id="importData" class="ghost">Import</button>
+        <button type="button" id="clearData" class="ghost danger-text">Delete all chats</button>
+      </div>
+      <div id="usageBox" class="usage"></div>
+    </section>
+
+    <div class="dlg-foot"><button type="button" id="saveSettings" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+
+<dialog id="remote" class="dlg remote">
+  <div class="dlg-body">
+    <div class="dlg-head"><h2>Control</h2><button type="button" class="icon" id="closeRemote">✕</button></div>
+    <nav class="tabs">
+      <button type="button" class="tab active" data-rtab="pc">My PC</button>
+      <button type="button" class="tab" data-rtab="phone">This phone</button>
+      <button type="button" class="tab" data-rtab="log">Activity</button>
+    </nav>
+
+    <section class="pane active" data-rpane="pc">
+      <div id="pcOff" class="notice hidden">PC control is off. Restart the server with <code>./run.sh --control</code>.</div>
+      <label>Pairing token <span class="muted">(printed by the server)</span>
+        <input id="pcToken" autocomplete="off" placeholder="pairing token"/>
+      </label>
+      <div class="row wrap">
+        <button type="button" id="pcConnect" class="primary">Connect</button>
+        <button type="button" id="pcRefresh" class="ghost">Refresh</button>
+        <span id="pcState" class="muted"></span>
+      </div>
+      <div id="pcInfo" class="usage pc-info"></div>
+      <div class="grid-btns">
+        <button type="button" data-pc="screenshot">📸 Screenshot</button>
+        <button type="button" data-pc="lock">🔒 Lock</button>
+        <button type="button" data-pc="volup">🔊 Vol +</button>
+        <button type="button" data-pc="voldown">🔉 Vol −</button>
+        <button type="button" data-pc="mute">🔇 Mute</button>
+        <button type="button" data-pc="play">⏯ Play</button>
+        <button type="button" data-pc="prev">⏮ Prev</button>
+        <button type="button" data-pc="next">⏭ Next</button>
+        <button type="button" data-pc="windows">🪟 Windows</button>
+        <button type="button" data-pc="files">📁 Files</button>
+        <button type="button" data-pc="notify">🔔 Notify</button>
+        <button type="button" data-pc="audit">🧾 Activity</button>
+      </div>
+      <div class="row">
+        <input id="pcType" placeholder="Type on my PC…"/>
+        <button type="button" id="pcTypeBtn" class="ghost">Type</button>
+        <button type="button" id="pcEnterBtn" class="ghost">⏎</button>
+        <button type="button" id="pcBackBtn" class="ghost">⌫</button>
+      </div>
+      <div class="row wrap" id="pcKeys"></div>
+      <div class="row">
+        <select id="pcRunSel"></select>
+        <button type="button" id="pcRunBtn" class="ghost">Run on PC</button>
+      </div>
+      <div class="row wrap">
+        <button type="button" id="pcPower" class="danger-text">PC power…</button>
+        <span class="muted small">asks for confirmation</span>
+      </div>
+      <div id="shotWrap" class="shot-wrap hidden"><img id="shotImg" alt="PC screenshot"/></div>
+      <div id="pcLog" class="pc-log"></div>
+    </section>
+
+    <section class="pane" data-rpane="phone">
+      <div id="phoneInfo" class="usage pc-info"></div>
+      <div class="grid-btns">
+        <button type="button" id="phTorch">🔦 Torch</button>
+        <button type="button" id="phVibrate">📳 Vibrate</button>
+        <button type="button" id="phCopy">📋 Copy to phone</button>
+        <button type="button" id="phPaste">📥 Paste</button>
+        <button type="button" id="phShare">📤 Share</button>
+        <button type="button" id="phBattery">🔋 Battery</button>
+      </div>
+      <label>Clipboard text
+        <input id="phClip" placeholder="Text to copy / pasted text"/>
+      </label>
+      <label>Open Android settings
+        <select id="phSettings">
+          <option value="settings">Settings</option>
+          <option value="wifi">Wi-Fi</option>
+          <option value="bluetooth">Bluetooth</option>
+          <option value="display">Display</option>
+          <option value="sound">Sound</option>
+          <option value="battery">Battery</option>
+          <option value="app">This app</option>
+        </select>
+      </label>
+      <div class="row"><button type="button" id="phOpen" class="ghost">Open</button></div>
+      <div id="phoneLog" class="pc-log"></div>
+    </section>
+
+    <section class="pane" data-rpane="log">
+      <div class="row wrap"><button type="button" id="auditRefresh" class="ghost">Refresh</button><span class="muted small">Everything the app did on your PC.</span></div>
+      <div id="auditBox" class="pc-log"></div>
+    </section>
+  </div>
+</dialog>
+
+<dialog id="palette" class="dlg palette">
+  <div class="palette-body">
+    <input id="paletteInput" placeholder="Type a command… (Esc to close)"/>
+    <div id="paletteList" class="palette-list"></div>
+  </div>
+</dialog>
+
+<dialog id="onboard" class="dlg onboard">
+  <div class="dlg-body">
+    <h2>Welcome to Kadhali</h2>
+    <p class="muted">Your own voice AI. Any language. Coding help. Free with your NVIDIA key.</p>
+    <label>NVIDIA API key
+      <input id="onboardKey" type="password" placeholder="nvapi-…" autocomplete="off"/>
+    </label>
+    <p class="muted small">Get one at <a href="https://build.nvidia.com" target="_blank" rel="noopener">build.nvidia.com</a> → API Keys.</p>
+    <div class="row"><button id="onboardSave" class="primary">Start</button><button id="onboardSkip" class="ghost">Later</button></div>
+  </div>
+</dialog>
+
+<input id="fileInput" type="file" multiple accept=".txt,.md,.json,.js,.ts,.py,.java,.c,.cpp,.cs,.go,.rs,.rb,.php,.html,.css,.sql,.yml,.yaml,.sh,.csv,.log" hidden/>
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>
