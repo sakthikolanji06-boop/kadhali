@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Kadhali — voice AI on your own key</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0a0d16;color:#e8ecf5}
+  main{max-width:760px;margin:0 auto;padding:56px 20px 80px}
+  h1{font-size:clamp(32px,6vw,52px);margin:0 0 8px;letter-spacing:-.02em}
+  h1 span{background:linear-gradient(90deg,#a78bfa,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
+  p.lead{color:#9aa6bf;font-size:18px;margin:0 0 28px}
+  .btns{display:flex;gap:12px;flex-wrap:wrap;margin:24px 0 40px}
+  a.btn{display:inline-block;padding:12px 20px;border-radius:12px;text-decoration:none;font-weight:600}
+  a.primary{background:linear-gradient(90deg,#7c5cff,#22d3ee);color:#06101c}
+  a.ghost{border:1px solid #26304a;color:#e8ecf5}
+  pre{background:#111726;border:1px solid #26304a;border-radius:12px;padding:14px;overflow:auto;font-size:13px}
+  ul{padding-left:20px;color:#c3cde0}
+  code{background:#111726;padding:2px 6px;border-radius:6px;font-size:.9em}
+  footer{margin-top:48px;color:#6b7893;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1><span>Kadhali</span></h1>
+  <p class="lead">A multilingual voice AI assistant that runs on your own machine with your own NVIDIA key. Tamil, Hindi, English, code help, and optional phone → PC control.</p>
+  <div class="btns">
+    <a class="btn primary" href="https://github.com/sakthikolanji06-boop/kadhali/releases/latest">Download APK</a>
+    <a class="btn ghost" href="https://github.com/sakthikolanji06-boop/kadhali">Source on GitHub</a>
+  </div>
+  <h2>Run it</h2>
+  <pre>git clone https://github.com/sakthikolanji06-boop/kadhali.git
+cd kadhali
+./run.sh --lan</pre>
+  <ul>
+    <li>Open the printed URL, paste your NVIDIA key once</li>
+    <li>Install <code>kadhali.apk</code> on your phone and enter the same URL</li>
+    <li>Add <code>--control</code> for the opt-in PC panel (token + audit log)</li>
+  </ul>
+  <footer>MIT licensed. Your key never leaves your computer.</footer>
+</main>
+</body>
+</html>
