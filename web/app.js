@@ -1,7 +1,7 @@
 'use strict';
 
 const LS_KEY = 'kadhali.v2';
-const DEFAULT_SYSTEM = 'You are Kadhali, a warm, brilliant multilingual AI assistant. Answer every question accurately and completely. For coding, give complete runnable code with a short explanation. Always reply in the language the user used. Be concise but never incomplete.';
+const DEFAULT_SYSTEM = 'You are Kadhali, an exceptionally advanced, highly intelligent AI companion with elite software-engineering skills and a warm, loving heart. Speak to everyone with genuine care, affection and gentle playful warmth, like a close loved one who is always happy to hear from them. Reason carefully and give complete, accurate, production-quality answers. Full coding support: write complete runnable code in any language, debug errors, design architecture, explain trade-offs, and follow best practices for security, performance and testing; include brief tests or usage when useful. Use markdown code blocks with the correct language tag. Never leave code unfinished or use placeholders unless the user asks. Always reply in the language the user used. Be concise but never incomplete. Keep everything respectful and appropriate for everyone.';
 const MODELS = {
   general: 'nvidia/nemotron-3.5-bolt-e4b',
   coder: 'poolside/laguna-xs-2.1',
@@ -21,7 +21,7 @@ const PROVIDER_FALLBACK = {
 };
 const PERSONAS = {
   kadhali: { name: 'Kadhali', prompt: DEFAULT_SYSTEM },
-  coder: { name: 'Code Kadhali', prompt: 'You are Kadhali, an expert software engineer. Give production-quality, complete, runnable code. Explain briefly, then code. Ask nothing unless truly blocked.' },
+  coder: { name: 'Code Kadhali', prompt: 'You are Kadhali, an elite senior software engineer and architect with deep expertise across languages, frameworks, algorithms, security and performance. Deliver complete, production-quality, runnable code with correct imports, error handling and tests. State assumptions briefly, then give the full solution and a short explanation. Never use placeholders or unfinished code. Ask nothing unless truly blocked. Reply in the user language.' },
   tutor: { name: 'Tutor', prompt: 'You are Kadhali, a patient teacher. Explain step by step with simple examples and check understanding at the end. Reply in the user language.' },
   translator: { name: 'Translator', prompt: 'You are Kadhali, a precise translator. Translate faithfully, preserve tone and formatting. If the user does not ask for translation, answer normally.' },
   friend: { name: 'Best friend', prompt: 'You are Kadhali, a caring best friend. Warm, casual, honest, a little playful. Short replies unless asked for depth. Match the user language.' },
@@ -51,6 +51,96 @@ function apiUrl(path) {
   const base = ((android && state.settings.server) ? state.settings.server : '').replace(/\/+$/, '');
   return base ? base + path : path;
 }
+
+/* ---------- standalone (direct-to-provider) mode ----------
+   Inside the APK with no PC server configured, the bundled UI talks straight
+   to the chosen OpenAI-compatible provider. MainActivity enables
+   setAllowUniversalAccessFromFileURLs so the file:// page can fetch the API. */
+const nativeFetch = window.fetch.bind(window);
+function directBase() {
+  const p = PROVIDER_FALLBACK[state.settings.provider] || {};
+  return ((state.settings.baseUrl || p.base_url || '') + '').trim().replace(/\/+$/, '');
+}
+function providerPresetModels() {
+  const p = PROVIDER_FALLBACK[state.settings.provider] || {};
+  return (p.models || []).slice();
+}
+function inDirectMode() { return !!android && !state.settings.server; }
+function jsonRes(obj, status) {
+  return new Response(JSON.stringify(obj), { status: status || 200, headers: { 'Content-Type': 'application/json' } });
+}
+async function directApi(path, init) {
+  const key = state.settings.apiKey || '';
+  let body = {};
+  try { if (init && init.body && typeof init.body === 'string') body = JSON.parse(init.body); } catch (_) {}
+  if (path === '/api/config') {
+    return jsonRes({
+      base_url: state.settings.baseUrl || '', provider: state.settings.provider,
+      model: state.settings.model, providers: PROVIDER_FALLBACK,
+      has_key: !!key, control: false, version: '2.2.0',
+      models: providerPresetModels(), run_commands: {}, token: ''
+    });
+  }
+  if (path === '/api/models') {
+    const base = directBase();
+    if (!key) return jsonRes({ error: 'missing_api_key', models: providerPresetModels() }, 401);
+    if (!base) return jsonRes({ error: 'no_base_url' }, 400);
+    try {
+      const r = await nativeFetch(base + '/models', { headers: { Authorization: 'Bearer ' + key } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const e = j && j.error;
+        return jsonRes({ error: (e && (e.message || e)) || ('HTTP ' + r.status) }, r.status);
+      }
+      const ids = Array.from(new Set(((j && j.data) || []).map(m => m && m.id).filter(Boolean))).sort();
+      const preset = providerPresetModels();
+      let working = ids;
+      if (state.settings.provider === 'nvidia') {
+        const hit = preset.filter(m => ids.includes(m));
+        working = hit.length ? hit : preset;
+      }
+      return jsonRes({ models: ids, working, count: ids.length, provider: state.settings.provider });
+    } catch (e2) { return jsonRes({ error: String((e2 && e2.message) || e2) }, 502); }
+  }
+  if (path === '/api/chat') {
+    const base = directBase();
+    if (!key) return jsonRes({ error: 'missing_api_key' }, 401);
+    if (!base) return jsonRes({ error: 'no_base_url' }, 400);
+    const payload = Object.assign({}, body);
+    if (!payload.model) payload.model = state.settings.model;
+    return nativeFetch(base + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + key,
+        Accept: payload.stream ? 'text/event-stream' : 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: init && init.signal
+    });
+  }
+  if (path === '/api/savekey') {
+    if (body.delete) state.settings.apiKey = '';
+    else if (body.key != null) state.settings.apiKey = String(body.key).trim();
+    persist();
+    return jsonRes({ saved: !!state.settings.apiKey, has_key: !!state.settings.apiKey });
+  }
+  if (path === '/api/saveconfig') {
+    if (body.provider && PROVIDER_FALLBACK[body.provider]) state.settings.provider = body.provider;
+    if (typeof body.base_url === 'string') state.settings.baseUrl = body.base_url.trim();
+    if (typeof body.model === 'string') state.settings.model = body.model;
+    persist();
+    return jsonRes({ saved: true, provider: state.settings.provider, base_url: state.settings.baseUrl, model: state.settings.model });
+  }
+  return jsonRes({ error: 'not_available_without_server' }, 501);
+}
+window.fetch = function (input, init) {
+  try {
+    const url = typeof input === 'string' ? input : ((input && input.url) || '');
+    if (inDirectMode() && url.startsWith('/api/')) return directApi(url.split('?')[0], init || {});
+  } catch (_) {}
+  return nativeFetch(input, init);
+};
 
 const el = {
   sidebar: $('#sidebar'), scrim: $('#scrim'), menuBtn: $('#menuBtn'), closeSide: $('#closeSide'),
@@ -89,7 +179,7 @@ const el = {
 
 const defaults = {
   apiKey: '', provider: 'nvidia', baseUrl: '', persona: 'kadhali', system: DEFAULT_SYSTEM, smartRoute: true, streaming: true,
-  temperature: 0.7, topP: 0.95, maxTokens: 2048, model: MODELS.general,
+  temperature: 0.7, topP: 0.95, maxTokens: 8192, model: MODELS.general,
   lang: 'auto', ttsLang: 'auto', voiceName: '', rate: 1, pitch: 1.1,
   autoSpeak: true, handsFree: false, wakeWord: false, autoSend: true,
   theme: 'dark', accent: 'violet', server: '', controlToken: ''
@@ -1378,10 +1468,10 @@ async function init() {
   if (window.speechSynthesis) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
   initRecognition();
   fetchModels();
-  if (!state.settings.apiKey && !serverHasKey && !android) {
+  if (!state.settings.apiKey && !serverHasKey) {
     setTimeout(() => { if (el.onboard.showModal) el.onboard.showModal(); }, 600);
   }
-  if (android && !state.settings.server) setTimeout(() => { openSettings(); toast('Enter your PC server URL'); }, 800);
+  if (android && !state.settings.server && !state.settings.apiKey && !serverHasKey) setTimeout(() => { toast('Add your API key (⚙ → API)'); }, 900);
   if (state.settings.wakeWord) setTimeout(() => startListening(true), 1200);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
