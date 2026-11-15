@@ -94,11 +94,11 @@
         <input id="modelName" type="text" list="modelOptions" autocomplete="off" placeholder="gpt-4o-mini"/>
         <datalist id="modelOptions"></datalist>
       </label>
-      <label id="serverRow" class="hidden">Server URL
-        <input id="serverUrl" type="url" placeholder="http://192.168.1.10:8765"/>
+      <label id="serverRow" class="hidden">PC server URL <span class="muted">(optional — leave empty to use this phone standalone)</span>
+        <input id="serverUrl" type="url" placeholder="leave empty for standalone"/>
       </label>
       <div class="row wrap"><button type="button" id="testKey" class="ghost">Test key</button><button type="button" id="refreshModels" class="ghost">Refresh models</button><button type="button" id="removeKey" class="ghost danger-text">Remove key</button><span id="keyStatus" class="muted"></span></div>
-      <p class="muted small" id="providerHint">Works with NVIDIA NIM, OpenAI, Groq, OpenRouter, or any OpenAI-compatible endpoint. The key is stored only on your server.</p>
+      <p class="muted small" id="providerHint">Works with NVIDIA NIM, OpenAI, Groq, OpenRouter, or any OpenAI-compatible endpoint. The key is stored only on your phone.</p>
     </section>
 
     <section class="pane" data-pane="chat">
@@ -119,7 +119,7 @@
         </label>
       </div>
       <label>Max tokens <output id="maxVal">2048</output>
-        <input id="maxTokens" type="range" min="128" max="8192" step="128" value="2048"/>
+        <input id="maxTokens" type="range" min="128" max="8192" step="128" value="8192"/>
       </label>
     </section>
 
