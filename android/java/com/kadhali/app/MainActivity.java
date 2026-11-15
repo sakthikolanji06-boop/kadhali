@@ -74,6 +74,8 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        try { s.setAllowUniversalAccessFromFileURLs(true); } catch (Throwable ignored) {}
+        try { s.setAllowFileAccessFromFileURLs(true); } catch (Throwable ignored) {}
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         try { WebView.setWebContentsDebuggingEnabled(true); } catch (Throwable ignored) {}
 
